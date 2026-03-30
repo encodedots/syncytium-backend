@@ -1,0 +1,79 @@
+// This is your Prisma schema file
+// Real-Time Data Sync POC - Database Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Tenant model for multi-tenancy
+model Tenant {
+  id         String      @id @default(uuid())
+  name       String
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  users      User[]
+  pcrRecords PcrRecord[] @relation("TenantPcrRecords")
+
+  @@map("tenants")
+}
+
+// User model with local role management
+model User {
+  id        String   @id @default(uuid())
+  auth0Id   String?  @unique @map("auth0_id") // Nullable since we manage roles locally
+  email     String   @unique
+  name      String
+  tenantId  String   @map("tenant_id")
+  role      String   // 'ADMIN' | 'MANAGER' | 'VIEWER'
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdPcrs    PcrRecord[] @relation("CreatedBy")
+  assignedPcrs   PcrRecord[] @relation("AssignedTo")
+
+  @@index([tenantId])
+  @@index([role])
+  @@map("users")
+}
+
+// Role model for RBAC permissions
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  permissions Json     // Array of permission strings
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("roles")
+}
+
+// PCR Record model for POC validation
+model PcrRecord {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  title      String
+  status     String
+  assignedTo String?  @map("assigned_to")
+  createdBy  String   @map("created_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tenant       Tenant @relation("TenantPcrRecords", fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedUser User?  @relation("AssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull)
+  creator      User   @relation("CreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([assignedTo])
+  @@index([createdBy])
+  @@map("pcr_records")
+}
