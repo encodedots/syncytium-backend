@@ -1,6 +1,15 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { LogicalReplicationService, PgoutputPlugin, Pgoutput } from 'pg-logical-replication';
+import {
+  LogicalReplicationService,
+  PgoutputPlugin,
+  Pgoutput,
+} from 'pg-logical-replication';
 import {
   WalEvent,
   WalOperation,
@@ -76,9 +85,10 @@ export class WalBridgeService implements OnModuleInit, OnModuleDestroy {
       this.replicationService = new LogicalReplicationService(
         {
           connectionString: databaseUrl,
-          ssl: {
-            rejectUnauthorized: false, // AWS RDS uses self-signed certificates
-          },
+          ssl:
+            process.env.NODE_ENV === 'production'
+              ? { rejectUnauthorized: false }
+              : false,
         },
         {
           acknowledge: {
@@ -95,15 +105,20 @@ export class WalBridgeService implements OnModuleInit, OnModuleDestroy {
       });
 
       // Listen for WAL messages (must be set before subscribe)
-      this.replicationService.on('data', async (lsn: string, log: Pgoutput.Message) => {
-        await this.handleWalMessage(lsn, log);
-      });
+      this.replicationService.on(
+        'data',
+        async (lsn: string, log: Pgoutput.Message) => {
+          await this.handleWalMessage(lsn, log);
+        },
+      );
 
       // Listen for start event
       this.replicationService.on('start', () => {
         this.isConnected = true;
         this.reconnectAttempts = 0;
-        this.logger.log('✅ Connected and subscribed to WAL replication stream');
+        this.logger.log(
+          '✅ Connected and subscribed to WAL replication stream',
+        );
       });
 
       // Listen for heartbeat/keepalive
@@ -119,15 +134,20 @@ export class WalBridgeService implements OnModuleInit, OnModuleDestroy {
       });
 
       // Subscribe to replication slot (non-blocking)
-      this.replicationService.subscribe(plugin, this.slotConfig.slotName).catch((error) => {
-        this.logger.error(`Failed to subscribe to replication slot: ${error.message}`);
-        this.handleConnectionError(error);
-      });
+      this.replicationService
+        .subscribe(plugin, this.slotConfig.slotName)
+        .catch((error) => {
+          this.logger.error(
+            `Failed to subscribe to replication slot: ${error.message}`,
+          );
+          this.handleConnectionError(error);
+        });
 
       this.logger.log('Subscribing to WAL replication stream...');
-
     } catch (error: any) {
-      this.logger.error(`Failed to connect to replication stream: ${error.message}`);
+      this.logger.error(
+        `Failed to connect to replication stream: ${error.message}`,
+      );
       this.isConnected = false;
       await this.scheduleReconnect();
     }
@@ -158,7 +178,10 @@ export class WalBridgeService implements OnModuleInit, OnModuleDestroy {
   /**
    * Handle WAL message from replication stream
    */
-  private async handleWalMessage(lsn: string, log: Pgoutput.Message): Promise<void> {
+  private async handleWalMessage(
+    lsn: string,
+    log: Pgoutput.Message,
+  ): Promise<void> {
     try {
       // The pg-logical-replication library already decodes the message
       const event = this.convertToWalEvent(lsn, log);
@@ -183,7 +206,10 @@ export class WalBridgeService implements OnModuleInit, OnModuleDestroy {
   /**
    * Convert pg-logical-replication message to WalEvent
    */
-  private convertToWalEvent(lsn: string, log: Pgoutput.Message): WalEvent | null {
+  private convertToWalEvent(
+    lsn: string,
+    log: Pgoutput.Message,
+  ): WalEvent | null {
     try {
       // Handle different message types
       if (log.tag === 'insert') {
@@ -272,7 +298,9 @@ export class WalBridgeService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.logger.error('Max reconnection attempts reached. Manual intervention required.');
+      this.logger.error(
+        'Max reconnection attempts reached. Manual intervention required.',
+      );
       return;
     }
 
