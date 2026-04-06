@@ -2,8 +2,6 @@ import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
-import * as fs from 'fs';
-import * as path from 'path';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -13,47 +11,20 @@ async function setupReplicaIdentity() {
   console.log('🔧 Setting up Replica Identity...\n');
 
   try {
-    // Read the SQL file
-    const sqlFilePath = path.join(__dirname, '../prisma/migrations/fix_replica_identity.sql');
-    const sqlContent = fs.readFileSync(sqlFilePath, 'utf-8');
+    // Set REPLICA IDENTITY FULL for pcr_records
+    console.log('📝 Setting REPLICA IDENTITY FULL for pcr_records...');
+    await prisma.$executeRawUnsafe('ALTER TABLE pcr_records REPLICA IDENTITY FULL;');
+    console.log('✅ Replica identity set for pcr_records\n');
 
-    // Split by semicolons and filter out comments and empty statements
-    const statements = sqlContent
-      .split(';')
-      .map(stmt => stmt.trim())
-      .filter(stmt => {
-        // Remove pure comment lines and empty statements
-        const cleanStmt = stmt
-          .split('\n')
-          .filter(line => !line.trim().startsWith('--'))
-          .join('\n')
-          .trim();
-        return cleanStmt.length > 0;
-      });
+    // Set REPLICA IDENTITY FULL for users
+    console.log('📝 Setting REPLICA IDENTITY FULL for users...');
+    await prisma.$executeRawUnsafe('ALTER TABLE users REPLICA IDENTITY FULL;');
+    console.log('✅ Replica identity set for users\n');
 
-    console.log('📝 Executing SQL statements...\n');
+    // Verify replica identity
+    console.log('🔍 Verifying replica identity settings...\n');
 
-    for (const statement of statements) {
-      if (statement) {
-        try {
-          const result = await prisma.$executeRawUnsafe(statement);
-          console.log(`✅ Executed: ${statement.substring(0, 60)}...`);
-        } catch (error) {
-          // Some statements might be queries not commands, try queryRaw
-          try {
-            const result = await prisma.$queryRawUnsafe(statement);
-            console.log(`✅ Query result:`, result);
-          } catch (queryError) {
-            console.error(`❌ Failed to execute:`, statement.substring(0, 60));
-            console.error(`   Error:`, (error as Error).message);
-          }
-        }
-      }
-    }
-
-    console.log('\n🔍 Verifying replica identity settings...\n');
-
-    const verifyQuery = `
+    const replicaSettings: any[] = await prisma.$queryRawUnsafe(`
       SELECT
         c.relname as table_name,
         CASE c.relreplident
@@ -65,27 +36,33 @@ async function setupReplicaIdentity() {
       FROM pg_class c
       WHERE c.relname IN ('pcr_records', 'users')
       ORDER BY c.relname;
-    `;
-
-    const results: any[] = await prisma.$queryRawUnsafe(verifyQuery);
+    `);
 
     console.log('📊 Current Replica Identity Settings:');
     console.log('═══════════════════════════════════════════');
-    results.forEach(row => {
+    replicaSettings.forEach(row => {
       const status = row.replica_identity.includes('FULL') ? '✅' : '⚠️';
       console.log(`${status} ${row.table_name}: ${row.replica_identity}`);
     });
     console.log('═══════════════════════════════════════════\n');
 
-    const allFull = results.every(row => row.replica_identity.includes('FULL'));
+    const allFull = replicaSettings.every(row => row.replica_identity.includes('FULL'));
     if (allFull) {
       console.log('✅ All tables configured correctly with REPLICA IDENTITY FULL!\n');
+      console.log('📝 What this means:');
+      console.log('   • UPDATE events will include ALL column values (old and new)');
+      console.log('   • You can detect tenant changes in real-time');
+      console.log('   • Old tenant_id will be available in WAL payload.old\n');
     } else {
       console.log('⚠️  Some tables are not set to FULL. Real-time updates may not work correctly.\n');
     }
 
   } catch (error) {
     console.error('❌ Error setting up replica identity:', error);
+    console.error('\n💡 Troubleshooting:');
+    console.error('   1. Ensure DATABASE_URL is set in your .env file');
+    console.error('   2. Ensure PostgreSQL is running');
+    console.error('   3. Ensure you have ALTER TABLE permissions\n');
     process.exit(1);
   } finally {
     await prisma.$disconnect();
