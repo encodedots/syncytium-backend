@@ -20,7 +20,7 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
       isGlobal: true,
       load: [configuration],
       validate,
-      envFilePath: '../.env',
+      envFilePath: '.env',
     }),
     PrismaModule,
     AuthModule,
