@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsEnum,
   IsUrl,
+  IsOptional,
   validateSync,
 } from 'class-validator';
 
@@ -19,6 +20,22 @@ class EnvironmentVariables {
 
   @IsString()
   DATABASE_URL!: string;
+
+  @IsString()
+  @IsOptional()
+  REDIS_HOST?: string;
+
+  @IsNumber()
+  @IsOptional()
+  REDIS_PORT?: number;
+
+  @IsString()
+  @IsOptional()
+  REDIS_PASSWORD?: string;
+
+  @IsString()
+  @IsOptional()
+  REDIS_URL?: string;
 
   @IsString()
   AUTH0_DOMAIN!: string;

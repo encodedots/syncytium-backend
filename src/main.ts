@@ -10,20 +10,26 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
+  // Configure logger - use pino-pretty only in development
+  const loggerConfig: any = {
+    level: process.env.LOG_LEVEL || 'info',
+  };
+
+  if (process.env.NODE_ENV !== 'production') {
+    loggerConfig.transport = {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'HH:MM:ss Z',
+        ignore: 'pid,hostname',
+      },
+    };
+  }
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
-      logger: {
-        level: process.env.LOG_LEVEL || 'info',
-        transport: {
-          target: 'pino-pretty',
-          options: {
-            colorize: true,
-            translateTime: 'HH:MM:ss Z',
-            ignore: 'pid,hostname',
-          },
-        },
-      },
+      logger: loggerConfig,
     }),
   );
 

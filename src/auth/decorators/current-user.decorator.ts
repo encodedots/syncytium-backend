@@ -1,5 +1,5 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import { UserContext } from '../auth.service';
+import { UserContext } from '../types/user-context.interface';
 
 /**
  * Extract current user from request

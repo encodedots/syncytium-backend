@@ -40,8 +40,14 @@ export class JwtAuthGuard implements CanActivate {
       // Verify token with Auth0 JWKS
       const auth0Payload = await this.authService.verifyToken(token);
 
-      // Get or create user in local database
-      const user = await this.authService.getOrCreateUser(auth0Payload);
+      // Get user from local database (no JIT provisioning - user must exist)
+      const user = await this.authService.getUserByAuth0Id(auth0Payload.sub);
+
+      if (!user) {
+        throw new UnauthorizedException(
+          'User not found. Please complete the login flow at /auth/callback first.',
+        );
+      }
 
       // Attach user context to request
       (request as any).user = user;

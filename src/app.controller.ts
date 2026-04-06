@@ -22,4 +22,28 @@ export class AppController {
   getHello(): string {
     return this.appService.getHello();
   }
+
+  @ApiOperation({
+    summary: 'Health check endpoint',
+    description: 'Returns service health status for Docker healthchecks',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Service is healthy',
+    schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', example: 'ok' },
+        timestamp: { type: 'string', example: '2026-03-30T12:00:00.000Z' },
+      },
+    },
+  })
+  @Public()
+  @Get('health')
+  healthCheck(): object {
+    return {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+    };
+  }
 }

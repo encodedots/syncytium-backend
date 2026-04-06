@@ -7,6 +7,7 @@ import {
   Res,
   HttpCode,
   HttpStatus,
+  UnauthorizedException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -17,7 +18,8 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { AuthService, UserContext } from './auth.service';
+import { AuthService } from './auth.service';
+import { UserContext } from './types/user-context.interface';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { ConfigService } from '@nestjs/config';
@@ -42,12 +44,12 @@ export class AuthController {
   @ApiBody({
     schema: {
       type: 'object',
-      required: ['code'],
+      required: ['access_token'],
       properties: {
-        code: {
+        access_token: {
           type: 'string',
-          description: 'Authorization code from Auth0 callback URL',
-          example: 'AUTH0_AUTHORIZATION_CODE',
+          description: 'Access token from Auth0 (frontend exchanges code with PKCE)',
+          example: 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...',
         },
       },
     },
@@ -69,39 +71,47 @@ export class AuthController {
   })
   @ApiResponse({
     status: 401,
-    description: 'Authentication failed - invalid code or token verification failed',
+    description: 'Authentication failed - invalid token',
   })
   @Public()
   @Post('callback')
   @HttpCode(HttpStatus.OK)
   async callback(
-    @Body('code') code: string,
+    @Body('access_token') accessToken: string,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<UserContext> {
-    if (!code) {
-      throw new Error('Authorization code is required');
+    if (!accessToken) {
+      throw new UnauthorizedException('Access token is required');
     }
 
-    // Exchange code for token
-    const accessToken = await this.authService.exchangeCodeForToken(code);
-
-    // Verify token and get/create user
+    // Verify token signature
     const auth0Payload = await this.authService.verifyToken(accessToken);
-    const user = await this.authService.getOrCreateUser(auth0Payload);
 
-    // Get token expiration
-    const expiresIn = this.authService.getTokenExpiration(accessToken);
+    // Fetch user profile from Auth0 /userinfo endpoint
+    // Access tokens don't include email/name claims, so we need to fetch them
+    const userInfo = await this.authService.getUserInfo(accessToken);
+
+    // Merge token payload with user info
+    const completePayload = {
+      ...auth0Payload,
+      email: userInfo.email,
+      name: userInfo.name || userInfo.email,
+    };
+
+    // Get or create user in database
+    const user = await this.authService.getOrCreateUser(completePayload);
 
     // Set HTTP-only cookie with the access token
+    const isProduction = this.configService.get('nodeEnv') === 'production';
     reply.setCookie('access_token', accessToken, {
       httpOnly: true, // CRITICAL: Cannot be accessed by JavaScript
-      secure: this.configService.get('nodeEnv') === 'production', // HTTPS only in production
-      sameSite: 'none', // Required for cross-domain
-      maxAge: expiresIn, // Seconds (from token expiration)
+      secure: isProduction, // HTTPS only in production
+      sameSite: isProduction ? 'none' : 'lax', // 'lax' for development (localhost), 'none' for production (cross-domain)
+      maxAge: auth0Payload.exp - Math.floor(Date.now() / 1000), // Time until token expires
       path: '/',
     });
 
-    // Return user profile (NOT the token)
+    // Return user profile (NOT the tokens)
     return user;
   }
 
@@ -132,6 +142,13 @@ export class AuthController {
       secure: this.configService.get('nodeEnv') === 'production',
       sameSite: 'none',
       path: '/',
+    });
+
+    reply.clearCookie('refresh_token', {
+      httpOnly: true,
+      secure: this.configService.get('nodeEnv') === 'production',
+      sameSite: 'none',
+      path: '/auth',
     });
 
     return { success: true };
@@ -169,5 +186,62 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: UserContext): UserContext {
     return user;
+  }
+
+  /**
+   * POST /auth/refresh
+   * Refresh access token using refresh token
+   */
+  @ApiOperation({
+    summary: 'Refresh access token',
+    description:
+      'Uses the refresh_token cookie to obtain a new access token. Automatically called by frontend before token expiration.',
+  })
+  @ApiCookieAuth('refresh_token')
+  @ApiResponse({
+    status: 200,
+    description: 'Successfully refreshed. New access_token cookie set.',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        expiresIn: { type: 'number', example: 3600 },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - no valid refresh_token cookie present',
+  })
+  @Public()
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  async refresh(
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<{ success: boolean; expiresIn: number }> {
+    const refreshToken = request.cookies['refresh_token'];
+
+    if (!refreshToken) {
+      throw new UnauthorizedException('No refresh token provided');
+    }
+
+    // Get new access token using refresh token
+    const tokens = await this.authService.refreshAccessToken(refreshToken);
+
+    // Set new access token cookie
+    const isProduction = this.configService.get('nodeEnv') === 'production';
+    reply.setCookie('access_token', tokens.access_token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      maxAge: tokens.expires_in,
+      path: '/',
+    });
+
+    return {
+      success: true,
+      expiresIn: tokens.expires_in,
+    };
   }
 }
