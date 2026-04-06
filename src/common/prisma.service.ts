@@ -14,6 +14,7 @@ export class PrismaService
     super({ adapter });
   }
   async onModuleInit() {
+    console.log('[PrismaService] onModuleInit()', process.env.DATABASE_URL);
     await this.$connect();
     console.log('✅ Database connected successfully');
   }
