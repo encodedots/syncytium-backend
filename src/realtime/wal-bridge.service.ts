@@ -76,6 +76,9 @@ export class WalBridgeService implements OnModuleInit, OnModuleDestroy {
       this.replicationService = new LogicalReplicationService(
         {
           connectionString: databaseUrl,
+          ssl: {
+            rejectUnauthorized: false, // AWS RDS uses self-signed certificates
+          },
         },
         {
           acknowledge: {
