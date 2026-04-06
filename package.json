@@ -22,6 +22,7 @@
     "wal:setup": "ts-node scripts/setup-wal.ts",
     "db:wal:setup": "ts-node scripts/setup-wal-publication.ts",
     "db:replica:fix": "ts-node scripts/setup-replica-identity.ts",
+    "db:sync:auth0": "ts-node scripts/sync-users-to-auth0.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
